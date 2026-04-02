@@ -2,7 +2,7 @@ name: Sync upstream + threads patch
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 */12 * * *'
   workflow_dispatch:
     inputs:
       upstream_ref:
