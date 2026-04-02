@@ -6,8 +6,8 @@ from ..utils import (
     remove_end,
     strip_or_none,
     traverse_obj,
-    urlencode_postdata,
     url_or_none,
+    urlencode_postdata,
 )
 from .common import InfoExtractor
 
