@@ -1,0 +1,138 @@
+name: Sync upstream + threads patch
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: 'Upstream ref to sync from'
+        required: false
+        default: 'master'
+        type: string
+      update_release_branch:
+        description: 'Push patched head to release/main (triggers release workflow)'
+        required: false
+        default: true
+        type: boolean
+      force_push:
+        description: 'Force-push branches even if there are no changes'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    if: ${{ vars.SYNC_ENABLED != 'false' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Resolve inputs
+        id: inputs
+        env:
+          INPUT_UPSTREAM_REF: ${{ github.event.inputs.upstream_ref }}
+          INPUT_UPDATE_RELEASE_BRANCH: ${{ github.event.inputs.update_release_branch }}
+          INPUT_FORCE_PUSH: ${{ github.event.inputs.force_push }}
+        run: |
+          upstream_ref="${INPUT_UPSTREAM_REF:-master}"
+          update_release_branch="${INPUT_UPDATE_RELEASE_BRANCH:-true}"
+          force_push="${INPUT_FORCE_PUSH:-false}"
+
+          echo "upstream_ref=${upstream_ref}" >> "$GITHUB_OUTPUT"
+          echo "update_release_branch=${update_release_branch}" >> "$GITHUB_OUTPUT"
+          echo "force_push=${force_push}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Sync upstream and apply patch branches
+        id: sync
+        env:
+          UPSTREAM_REF: ${{ steps.inputs.outputs.upstream_ref }}
+        run: |
+          set -euo pipefail
+
+          git remote add upstream https://github.com/yt-dlp/yt-dlp.git 2>/dev/null || true
+          git fetch --no-tags upstream "${UPSTREAM_REF}"
+          git fetch --no-tags origin feature/threads-fix automation/workflows release/main || true
+
+          upstream_sha="$(git rev-parse FETCH_HEAD)"
+          git branch -f upstream-sync "${upstream_sha}"
+
+          git checkout -B release-main-sync "${upstream_sha}"
+
+          for source_branch in feature/threads-fix automation/workflows; do
+            commits="$(git rev-list --reverse --no-merges "${upstream_sha}..origin/${source_branch}" || true)"
+            if [[ -n "${commits}" ]]; then
+              while read -r commit; do
+                [[ -z "${commit}" ]] && continue
+                git cherry-pick -x "${commit}"
+              done <<< "${commits}"
+            fi
+          done
+
+          echo "upstream_sha=${upstream_sha}" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Open sync conflict issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_SHA: ${{ steps.sync.outputs.upstream_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          issue_body=$(cat <<EOF
+          Daily sync failed while cherry-picking patch branches.
+
+          Upstream SHA: ${UPSTREAM_SHA:-unknown}
+          Source branches: feature/threads-fix, automation/workflows
+          Workflow run: ${RUN_URL}
+
+          Resolve conflicts manually and rerun sync workflow.
+          EOF
+          )
+          gh issue create \
+            --title "Sync conflict applying patch branches at ${UPSTREAM_SHA:-unknown-sha}" \
+            --body "${issue_body}" || true
+
+      - name: Compare remote branch heads
+        id: diff
+        if: success()
+        env:
+          UPSTREAM_SHA: ${{ steps.sync.outputs.upstream_sha }}
+          RELEASE_SHA: ${{ steps.sync.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+
+          remote_upstream="$(git ls-remote --heads origin upstream-sync | awk '{print $1}')"
+          remote_release="$(git ls-remote --heads origin release/main | awk '{print $1}')"
+
+          [[ "${UPSTREAM_SHA}" != "${remote_upstream}" ]] && upstream_changed=true || upstream_changed=false
+          [[ "${RELEASE_SHA}" != "${remote_release}" ]] && release_changed=true || release_changed=false
+
+          echo "upstream_changed=${upstream_changed}" >> "$GITHUB_OUTPUT"
+          echo "release_changed=${release_changed}" >> "$GITHUB_OUTPUT"
+
+      - name: Push upstream-sync
+        if: success() && (steps.diff.outputs.upstream_changed == 'true' || steps.inputs.outputs.force_push == 'true')
+        run: git push --force origin upstream-sync:upstream-sync
+
+      - name: Push release/main
+        if: success() && vars.AUTO_RELEASE_ENABLED != 'false' && steps.inputs.outputs.update_release_branch == 'true' && (steps.diff.outputs.release_changed == 'true' || steps.inputs.outputs.force_push == 'true')
+        run: git push --force origin HEAD:release/main
