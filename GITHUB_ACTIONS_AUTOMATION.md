@@ -34,7 +34,9 @@ This repo uses a small custom automation layer on top of upstream `yt-dlp` workf
 **Main steps**
 - resolve upstream source:
   - explicit `upstream_ref`, or
-  - latest upstream release tag by `upstream_release_channel` (default `nightly`, with stable fallback if no prerelease exists)
+  - latest upstream release by `upstream_release_channel`:
+    - `nightly`: `yt-dlp/yt-dlp-nightly-builds` latest release tag + target commit
+    - `stable`: `yt-dlp/yt-dlp` latest stable release tag
 - set `upstream-sync` to upstream SHA
 - recreate temporary branch from upstream
 - cherry-pick commits from:
@@ -132,7 +134,7 @@ gh workflow run sync.yml -R MajorMajorMajorMajor/yt-dlp-mmmm --ref release/main 
 
 ```bash
 gh workflow run auto-release.yml -R MajorMajorMajorMajor/yt-dlp-mmmm --ref release/main \
-  -f upstream_version=2026.03.17 -f release_channel=nightly
+  -f upstream_version=2026.03.29.233709 -f release_channel=nightly
 ```
 
 ### Run auto-release manually with explicit release tag override

@@ -62,12 +62,7 @@ jobs:
               source_version="${INPUT_UPSTREAM_VERSION}"
             else
               if [[ "${release_channel}" == "nightly" ]]; then
-                source_version="$(gh api 'repos/yt-dlp/yt-dlp/releases?per_page=50' --jq 'map(select(.prerelease == true))[0].tag_name // empty')"
-                if [[ -z "${source_version}" ]]; then
-                  echo "No upstream prerelease found; falling back to latest stable release"
-                  source_version="$(gh api repos/yt-dlp/yt-dlp/releases/latest --jq .tag_name)"
-                  release_channel="stable"
-                fi
+                source_version="$(gh api repos/yt-dlp/yt-dlp-nightly-builds/releases/latest --jq .tag_name)"
               else
                 source_version="$(gh api repos/yt-dlp/yt-dlp/releases/latest --jq .tag_name)"
               fi
