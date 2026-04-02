@@ -11,7 +11,7 @@ on:
         default: ''
         type: string
       update_release_branch:
-        description: 'Push patched head to release/main and trigger auto-release workflow'
+        description: 'Push patched head to dist/main and trigger auto-release workflow'
         required: false
         default: true
         type: boolean
@@ -119,14 +119,14 @@ jobs:
 
           git remote add upstream https://github.com/yt-dlp/yt-dlp.git 2>/dev/null || true
           git fetch --no-tags upstream "${UPSTREAM_REF}"
-          git fetch --no-tags origin feature/threads-fix automation/workflows release/main || true
+          git fetch --no-tags origin src/threads src/automation dist/main || true
 
           upstream_sha="$(git rev-parse FETCH_HEAD)"
-          git branch -f upstream-sync "${upstream_sha}"
+          git branch -f src/upstream "${upstream_sha}"
 
-          git checkout -B release-main-sync "${upstream_sha}"
+          git checkout -B dist-main-sync "${upstream_sha}"
 
-          for source_branch in feature/threads-fix automation/workflows; do
+          for source_branch in src/threads src/automation; do
             commits="$(git rev-list --reverse --no-merges "${upstream_sha}..origin/${source_branch}" || true)"
             if [[ -n "${commits}" ]]; then
               while read -r commit; do
@@ -150,7 +150,7 @@ jobs:
           Daily sync failed while cherry-picking patch branches.
 
           Upstream SHA: ${UPSTREAM_SHA:-unknown}
-          Source branches: feature/threads-fix, automation/workflows
+          Source branches: src/threads, src/automation
           Workflow run: ${RUN_URL}
 
           Resolve conflicts manually and rerun sync workflow.
@@ -169,8 +169,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          remote_upstream="$(git ls-remote --heads origin upstream-sync | awk '{print $1}')"
-          remote_release="$(git ls-remote --heads origin release/main | awk '{print $1}')"
+          remote_upstream="$(git ls-remote --heads origin src/upstream | awk '{print $1}')"
+          remote_release="$(git ls-remote --heads origin dist/main | awk '{print $1}')"
 
           [[ "${UPSTREAM_SHA}" != "${remote_upstream}" ]] && upstream_changed=true || upstream_changed=false
           [[ "${RELEASE_SHA}" != "${remote_release}" ]] && release_changed=true || release_changed=false
@@ -178,13 +178,13 @@ jobs:
           echo "upstream_changed=${upstream_changed}" >> "$GITHUB_OUTPUT"
           echo "release_changed=${release_changed}" >> "$GITHUB_OUTPUT"
 
-      - name: Push upstream-sync
+      - name: Push src/upstream
         if: success() && (steps.diff.outputs.upstream_changed == 'true' || steps.inputs.outputs.force_push == 'true')
-        run: git push --force origin upstream-sync:upstream-sync
+        run: git push --force origin src/upstream:src/upstream
 
-      - name: Push release/main
+      - name: Push dist/main
         if: success() && vars.AUTO_RELEASE_ENABLED != 'false' && steps.inputs.outputs.update_release_branch == 'true' && (steps.diff.outputs.release_changed == 'true' || steps.inputs.outputs.force_push == 'true')
-        run: git push --force origin HEAD:release/main
+        run: git push --force origin HEAD:dist/main
 
       - name: Trigger auto-release workflow
         if: success() && vars.AUTO_RELEASE_ENABLED != 'false' && steps.inputs.outputs.update_release_branch == 'true' && steps.upstream.outputs.should_release == 'true' && (steps.diff.outputs.release_changed == 'true' || steps.inputs.outputs.force_push == 'true')
@@ -192,4 +192,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           UPSTREAM_TAG: ${{ steps.upstream.outputs.upstream_tag }}
           UPSTREAM_CHANNEL: ${{ steps.upstream.outputs.upstream_channel }}
-        run: gh workflow run auto-release.yml --repo "${{ github.repository }}" --ref release/main -f upstream_version="${UPSTREAM_TAG}" -f release_channel="${UPSTREAM_CHANNEL}"
+        run: gh workflow run auto-release.yml --repo "${{ github.repository }}" --ref dist/main -f upstream_version="${UPSTREAM_TAG}" -f release_channel="${UPSTREAM_CHANNEL}"
