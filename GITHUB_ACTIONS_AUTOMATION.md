@@ -4,9 +4,9 @@ This repo uses a small custom automation layer on top of upstream `yt-dlp` workf
 
 ## What it does
 
-1. Poll upstream `yt-dlp/yt-dlp` releases every 30 minutes
+1. Poll upstream releases every 30 minutes
 2. Re-apply fork-specific commits (Threads fix + workflow customizations)
-3. Push a generated `release/main` branch
+3. Push a generated `dist/main` branch
 4. Build artifacts
 5. Publish a GitHub Release with updater assets (`_update_spec`, `SHA2-256SUMS`, `yt-dlp`, etc.)
 
@@ -14,18 +14,18 @@ This repo uses a small custom automation layer on top of upstream `yt-dlp` workf
 
 ## Branch model
 
-- `upstream-sync`: mirror of upstream `master`
-- `feature/threads-fix`: custom extractor patch commits
-- `automation/workflows`: custom CI/workflow commits
-- `release/main`: generated branch = upstream + cherry-picked custom commits
+- `src/upstream`: mirror of upstream source commit/tag
+- `src/threads`: custom extractor patch commits
+- `src/automation`: custom CI/workflow commits
+- `dist/main`: generated branch = upstream + cherry-picked custom commits
 
-`release/main` is the default branch and the release source.
+`dist/main` is the default branch and release source.
 
 ---
 
 ## Workflow map
 
-### 1) `.github/workflows/sync.yml` — **Sync upstream + threads patch**
+### 1) `.github/workflows/sync.yml` — **Sync upstream + patches**
 
 **Triggers**
 - `schedule` (every 30 min, cron `*/30 * * * *`)
@@ -34,18 +34,18 @@ This repo uses a small custom automation layer on top of upstream `yt-dlp` workf
 **Main steps**
 - resolve upstream source:
   - explicit `upstream_ref`, or
-  - latest upstream release by `upstream_release_channel`:
+  - by `upstream_release_channel`:
     - `nightly`: `yt-dlp/yt-dlp-nightly-builds` latest release tag + target commit
     - `stable`: `yt-dlp/yt-dlp` latest stable release tag
-- set `upstream-sync` to upstream SHA
+- set `src/upstream` to upstream SHA
 - recreate temporary branch from upstream
 - cherry-pick commits from:
-  - `feature/threads-fix`
-  - `automation/workflows`
+  - `src/threads`
+  - `src/automation`
 - compare against remote branch heads
 - force-push:
-  - `upstream-sync`
-  - `release/main` (if changed and enabled)
+  - `src/upstream`
+  - `dist/main` (if changed and enabled)
 - explicitly trigger `auto-release.yml`
 - on conflict/failure, open an issue
 
@@ -57,11 +57,11 @@ This repo uses a small custom automation layer on top of upstream `yt-dlp` workf
 
 **Feature flags (repo variables)**
 - `SYNC_ENABLED` (`false` disables workflow job)
-- `AUTO_RELEASE_ENABLED` (`false` prevents release/main push + trigger)
+- `AUTO_RELEASE_ENABLED` (`false` prevents `dist/main` push + release trigger)
 
 ---
 
-### 2) `.github/workflows/auto-release.yml` — **Release from release/main**
+### 2) `.github/workflows/auto-release.yml` — **Release from dist/main**
 
 **Triggers**
 - `workflow_dispatch` (typically invoked by `sync.yml`)
@@ -80,38 +80,28 @@ This repo uses a small custom automation layer on top of upstream `yt-dlp` workf
    - `gh release create`
    - verify `/releases/latest` contains required assets
 
-**Important implementation detail**
-All `gh release` commands use `--repo "${GITHUB_REPOSITORY}"` so they work reliably in non-checkout contexts.
+All `gh release` commands use `--repo "${GITHUB_REPOSITORY}"`.
 
 ---
 
-### 3) `.github/workflows/build.yml` — **Build Artifacts** (reusable upstream workflow)
+### 3) `.github/workflows/build.yml` — **Build Artifacts**
 
 Called by `auto-release.yml` via `workflow_call`.
 
 Builds platform binaries and updater metadata, including:
 - `_update_spec`
 - `SHA2-256SUMS`
-- `yt-dlp` (plus many platform-specific outputs)
+- `yt-dlp`
 
 ---
 
 ## End-to-end flow
 
 1. `sync.yml` runs every 30 minutes (or manually)
-2. It generates and pushes updated `release/main`
+2. It generates and pushes updated `dist/main`
 3. It triggers `auto-release.yml`
 4. `auto-release.yml` builds + publishes release assets
 5. Clients can query `releases/latest`
-
----
-
-## Permissions required
-
-- In workflow files:
-  - `sync.yml`: `contents: write`, `issues: write`, `actions: write`
-  - `auto-release.yml`: `contents: write`
-- Repo settings must allow Actions and write operations for `GITHUB_TOKEN`.
 
 ---
 
@@ -120,57 +110,26 @@ Builds platform binaries and updater metadata, including:
 ### Run sync now
 
 ```bash
-gh workflow run sync.yml -R MajorMajorMajorMajor/yt-dlp-mmmm --ref release/main
+gh workflow run sync.yml -R MajorMajorMajorMajor/yt-dlp-mmmm --ref dist/main
 ```
 
-### Run sync without updating `release/main`
+### Run sync without updating `dist/main`
 
 ```bash
-gh workflow run sync.yml -R MajorMajorMajorMajor/yt-dlp-mmmm --ref release/main \
+gh workflow run sync.yml -R MajorMajorMajorMajor/yt-dlp-mmmm --ref dist/main \
   -f update_release_branch=false
 ```
 
 ### Run auto-release manually with upstream version + channel
 
 ```bash
-gh workflow run auto-release.yml -R MajorMajorMajorMajor/yt-dlp-mmmm --ref release/main \
+gh workflow run auto-release.yml -R MajorMajorMajorMajor/yt-dlp-mmmm --ref dist/main \
   -f upstream_version=2026.03.29.233709 -f release_channel=nightly
 ```
-
-### Run auto-release manually with explicit release tag override
-
-```bash
-gh workflow run auto-release.yml -R MajorMajorMajorMajor/yt-dlp-mmmm --ref release/main \
-  -f version=2026.03.17-mmmm
-```
-
----
-
-## Troubleshooting
-
-### No releases created
-- Check `Release from release/main` workflow runs
-- Confirm `AUTO_RELEASE_ENABLED` is not `false`
-- Confirm `sync.yml` reached:
-  - push `release/main`
-  - trigger `auto-release.yml`
-
-### `releases/latest` missing assets
-- Inspect `publish` step in `auto-release.yml`
-- Ensure required files exist in downloaded artifacts:
-  - `_update_spec`
-  - `SHA2-256SUMS`
-  - `yt-dlp`
-
-### Cherry-pick conflict during sync
-- Workflow opens an issue with upstream SHA
-- Rebase/fix commits in `feature/threads-fix` or `automation/workflows`
-- rerun `sync.yml`
 
 ---
 
 ## Notes
 
-- `release/main` is generated output and can be force-pushed.
-- Keep patch branches small and focused for easier conflict resolution.
-- Upstream test/release workflows still exist; custom automation is centered on `sync.yml` + `auto-release.yml`.
+- `dist/main` is generated output and can be force-pushed.
+- Keep `src/threads` and `src/automation` minimal for easier conflict handling.
