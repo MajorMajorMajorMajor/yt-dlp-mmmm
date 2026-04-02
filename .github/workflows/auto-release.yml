@@ -1,13 +1,23 @@
 name: Release from release/main
 
 on:
-  push:
-    branches:
-      - release/main
   workflow_dispatch:
     inputs:
+      upstream_version:
+        description: 'Upstream release tag/version to mirror (without -mmmm suffix)'
+        required: false
+        default: ''
+        type: string
+      release_channel:
+        description: 'Update channel embedded into built artifacts'
+        required: false
+        default: nightly
+        type: choice
+        options:
+          - nightly
+          - stable
       version:
-        description: 'Release version (yyyy.mm.dd[.rev]). Leave empty for auto.'
+        description: 'Explicit release tag override (highest priority)'
         required: false
         default: ''
         type: string
@@ -24,6 +34,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      build_version: ${{ steps.version.outputs.build_version }}
+      release_channel: ${{ steps.version.outputs.release_channel }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -35,22 +47,43 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_UPSTREAM_VERSION: ${{ github.event.inputs.upstream_version }}
+          INPUT_RELEASE_CHANNEL: ${{ github.event.inputs.release_channel }}
         run: |
           set -euo pipefail
 
+          release_channel="${INPUT_RELEASE_CHANNEL:-nightly}"
+
           if [[ -n "${INPUT_VERSION}" ]]; then
             version="${INPUT_VERSION}"
+            source_version="${INPUT_VERSION}"
           else
-            base="$(date -u +%Y.%m.%d)"
-            version="${base}"
-            rev=1
-            while git rev-parse -q --verify "refs/tags/${version}" >/dev/null || gh release view "${version}" >/dev/null 2>&1; do
-              version="${base}.${rev}"
-              rev=$((rev + 1))
-            done
+            if [[ -n "${INPUT_UPSTREAM_VERSION}" ]]; then
+              source_version="${INPUT_UPSTREAM_VERSION}"
+            else
+              if [[ "${release_channel}" == "nightly" ]]; then
+                source_version="$(gh api 'repos/yt-dlp/yt-dlp/releases?per_page=50' --jq 'map(select(.prerelease == true))[0].tag_name // empty')"
+                if [[ -z "${source_version}" ]]; then
+                  echo "No upstream prerelease found; falling back to latest stable release"
+                  source_version="$(gh api repos/yt-dlp/yt-dlp/releases/latest --jq .tag_name)"
+                  release_channel="stable"
+                fi
+              else
+                source_version="$(gh api repos/yt-dlp/yt-dlp/releases/latest --jq .tag_name)"
+              fi
+            fi
+            version="${source_version}-mmmm"
+          fi
+
+          if [[ "${source_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            build_version="${source_version}"
+          else
+            build_version="$(date -u +%Y.%m.%d.%H%M%S)"
           fi
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "build_version=${build_version}" >> "$GITHUB_OUTPUT"
+          echo "release_channel=${release_channel}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: [prepare]
@@ -58,8 +91,8 @@ jobs:
       contents: read
     uses: ./.github/workflows/build.yml
     with:
-      version: ${{ needs.prepare.outputs.version }}
-      channel: stable
+      version: ${{ needs.prepare.outputs.build_version }}
+      channel: ${{ needs.prepare.outputs.release_channel }}
       origin: ${{ github.repository }}
       linux_armv7l: true
 
@@ -88,13 +121,14 @@ jobs:
 
       - name: Recreate release tag if needed
         run: |
-          if gh release view "${VERSION}" >/dev/null 2>&1; then
-            gh release delete "${VERSION}" --cleanup-tag --yes
+          if gh release view "${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release delete "${VERSION}" --repo "${GITHUB_REPOSITORY}" --cleanup-tag --yes
           fi
 
       - name: Publish release
         run: |
           gh release create "${VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
             --target "${GITHUB_SHA}" \
             --title "yt-dlp ${VERSION}" \
             artifact/*
