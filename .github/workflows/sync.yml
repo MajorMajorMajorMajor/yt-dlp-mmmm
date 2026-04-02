@@ -119,9 +119,8 @@ jobs:
 
           git remote add upstream https://github.com/yt-dlp/yt-dlp.git 2>/dev/null || true
           git fetch --no-tags upstream "${UPSTREAM_REF}"
-          git fetch --no-tags origin src/threads src/automation dist/main || true
-
           upstream_sha="$(git rev-parse FETCH_HEAD)"
+          git fetch --no-tags origin src/threads src/automation dist/main || true
           git branch -f src/upstream "${upstream_sha}"
 
           git checkout -B dist-main-sync "${upstream_sha}"
