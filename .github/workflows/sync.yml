@@ -84,16 +84,12 @@ jobs:
             upstream_tag="${INPUT_UPSTREAM_REF}"
           else
             if [[ "${upstream_channel}" == "nightly" ]]; then
-              upstream_tag="$(gh api 'repos/yt-dlp/yt-dlp/releases?per_page=50' --jq 'map(select(.prerelease == true))[0].tag_name // empty')"
-              if [[ -z "${upstream_tag}" ]]; then
-                echo "No upstream prerelease found; falling back to latest stable release"
-                upstream_tag="$(gh api repos/yt-dlp/yt-dlp/releases/latest --jq .tag_name)"
-                upstream_channel="stable"
-              fi
+              upstream_tag="$(gh api repos/yt-dlp/yt-dlp-nightly-builds/releases/latest --jq .tag_name)"
+              upstream_ref="$(gh api repos/yt-dlp/yt-dlp-nightly-builds/releases/latest --jq '.target_commitish // "master"')"
             else
               upstream_tag="$(gh api repos/yt-dlp/yt-dlp/releases/latest --jq .tag_name)"
+              upstream_ref="${upstream_tag}"
             fi
-            upstream_ref="${upstream_tag}"
           fi
 
           release_tag="${upstream_tag}-mmmm"
