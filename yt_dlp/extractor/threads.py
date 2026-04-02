@@ -1,6 +1,5 @@
 import json
 
-from .common import InfoExtractor
 from ..utils import (
     decode_base_n,
     int_or_none,
@@ -10,6 +9,7 @@ from ..utils import (
     urlencode_postdata,
     url_or_none,
 )
+from .common import InfoExtractor
 
 _ENCODING_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
 
@@ -57,9 +57,6 @@ class ThreadsIE(InfoExtractor):
             'upload_date': '20240502',
             'thumbnail': r're:^https?://.*\.jpg',
         },
-    }, {
-        'url': 'barcelona://media?shortcode=C6fDehepo5D',
-        'only_matching': True,
     }]
 
     def _extract_graphql_media(self, url, video_id, lsd):
@@ -174,6 +171,10 @@ class ThreadsIE(InfoExtractor):
 class ThreadsIOSIE(InfoExtractor):
     IE_DESC = 'IOS barcelona:// URL'
     _VALID_URL = r'barcelona://media\?shortcode=(?P<id>[^/?#&]+)'
+    _TESTS = [{
+        'url': 'barcelona://media?shortcode=C6fDehepo5D',
+        'only_matching': True,
+    }]
 
     def _real_extract(self, url):
         video_id = self._match_id(url)
