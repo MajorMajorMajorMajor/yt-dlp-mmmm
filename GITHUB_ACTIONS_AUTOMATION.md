@@ -4,7 +4,7 @@ This repo uses a small custom automation layer on top of upstream `yt-dlp` workf
 
 ## What it does
 
-1. Poll upstream releases every 30 minutes
+1. Poll upstream releases every 12 hours
 2. Re-apply fork-specific commits (Threads fix + workflow customizations)
 3. Push a generated `dist/main` branch
 4. Build artifacts
@@ -28,7 +28,7 @@ This repo uses a small custom automation layer on top of upstream `yt-dlp` workf
 ### 1) `.github/workflows/sync.yml` — **Sync upstream + patches**
 
 **Triggers**
-- `schedule` (every 30 min, cron `*/30 * * * *`)
+- `schedule` (every 12 hours, cron `0 */12 * * *`)
 - `workflow_dispatch`
 
 **Main steps**
@@ -97,7 +97,7 @@ Builds platform binaries and updater metadata, including:
 
 ## End-to-end flow
 
-1. `sync.yml` runs every 30 minutes (or manually)
+1. `sync.yml` runs every 12 hours (or manually)
 2. It generates and pushes updated `dist/main`
 3. It triggers `auto-release.yml`
 4. `auto-release.yml` builds + publishes release assets
