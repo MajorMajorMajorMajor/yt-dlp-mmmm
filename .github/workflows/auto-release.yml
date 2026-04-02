@@ -44,7 +44,7 @@ jobs:
             base="$(date -u +%Y.%m.%d)"
             version="${base}"
             rev=1
-            while git rev-parse -q --verify "refs/tags/${version}" >/dev/null || gh release view "${version}" >/dev/null 2>&1; do
+            while git rev-parse -q --verify "refs/tags/${version}" >/dev/null || gh release view "${version}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; do
               version="${base}.${rev}"
               rev=$((rev + 1))
             done
@@ -88,13 +88,14 @@ jobs:
 
       - name: Recreate release tag if needed
         run: |
-          if gh release view "${VERSION}" >/dev/null 2>&1; then
-            gh release delete "${VERSION}" --cleanup-tag --yes
+          if gh release view "${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release delete "${VERSION}" --repo "${GITHUB_REPOSITORY}" --cleanup-tag --yes
           fi
 
       - name: Publish release
         run: |
           gh release create "${VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
             --target "${GITHUB_SHA}" \
             --title "yt-dlp ${VERSION}" \
             artifact/*
