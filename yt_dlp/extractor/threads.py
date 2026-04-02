@@ -1,5 +1,6 @@
 import json
 
+from .common import InfoExtractor
 from ..utils import (
     decode_base_n,
     int_or_none,
@@ -9,7 +10,6 @@ from ..utils import (
     url_or_none,
     urlencode_postdata,
 )
-from .common import InfoExtractor
 
 _ENCODING_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
 
