@@ -2,19 +2,27 @@ name: Sync upstream + threads patch
 
 on:
   schedule:
-    - cron: '17 3 * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
       upstream_ref:
-        description: 'Upstream ref to sync from'
+        description: 'Upstream ref/tag to sync from (empty = latest upstream release tag)'
         required: false
-        default: 'master'
+        default: ''
         type: string
       update_release_branch:
-        description: 'Push patched head to release/main (triggers release workflow)'
+        description: 'Push patched head to release/main and trigger auto-release workflow'
         required: false
         default: true
         type: boolean
+      upstream_release_channel:
+        description: 'Upstream release channel when upstream_ref is empty'
+        required: false
+        default: 'nightly'
+        type: choice
+        options:
+          - nightly
+          - stable
       force_push:
         description: 'Force-push branches even if there are no changes'
         required: false
@@ -28,6 +36,7 @@ concurrency:
 permissions:
   contents: write
   issues: write
+  actions: write
 
 jobs:
   sync:
@@ -45,16 +54,60 @@ jobs:
         id: inputs
         env:
           INPUT_UPSTREAM_REF: ${{ github.event.inputs.upstream_ref }}
+          INPUT_UPSTREAM_RELEASE_CHANNEL: ${{ github.event.inputs.upstream_release_channel }}
           INPUT_UPDATE_RELEASE_BRANCH: ${{ github.event.inputs.update_release_branch }}
           INPUT_FORCE_PUSH: ${{ github.event.inputs.force_push }}
         run: |
-          upstream_ref="${INPUT_UPSTREAM_REF:-master}"
+          upstream_release_channel="${INPUT_UPSTREAM_RELEASE_CHANNEL:-nightly}"
           update_release_branch="${INPUT_UPDATE_RELEASE_BRANCH:-true}"
           force_push="${INPUT_FORCE_PUSH:-false}"
 
-          echo "upstream_ref=${upstream_ref}" >> "$GITHUB_OUTPUT"
+          echo "upstream_ref=${INPUT_UPSTREAM_REF}" >> "$GITHUB_OUTPUT"
+          echo "upstream_release_channel=${upstream_release_channel}" >> "$GITHUB_OUTPUT"
           echo "update_release_branch=${update_release_branch}" >> "$GITHUB_OUTPUT"
           echo "force_push=${force_push}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve upstream release target
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_UPSTREAM_REF: ${{ steps.inputs.outputs.upstream_ref }}
+          INPUT_UPSTREAM_RELEASE_CHANNEL: ${{ steps.inputs.outputs.upstream_release_channel }}
+          FORCE_PUSH: ${{ steps.inputs.outputs.force_push }}
+        run: |
+          set -euo pipefail
+
+          upstream_channel="${INPUT_UPSTREAM_RELEASE_CHANNEL:-nightly}"
+
+          if [[ -n "${INPUT_UPSTREAM_REF}" ]]; then
+            upstream_ref="${INPUT_UPSTREAM_REF}"
+            upstream_tag="${INPUT_UPSTREAM_REF}"
+          else
+            if [[ "${upstream_channel}" == "nightly" ]]; then
+              upstream_tag="$(gh api 'repos/yt-dlp/yt-dlp/releases?per_page=50' --jq 'map(select(.prerelease == true))[0].tag_name // empty')"
+              if [[ -z "${upstream_tag}" ]]; then
+                echo "No upstream prerelease found; falling back to latest stable release"
+                upstream_tag="$(gh api repos/yt-dlp/yt-dlp/releases/latest --jq .tag_name)"
+                upstream_channel="stable"
+              fi
+            else
+              upstream_tag="$(gh api repos/yt-dlp/yt-dlp/releases/latest --jq .tag_name)"
+            fi
+            upstream_ref="${upstream_tag}"
+          fi
+
+          release_tag="${upstream_tag}-mmmm"
+          should_release=true
+
+          if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 && [[ "${FORCE_PUSH}" != "true" ]]; then
+            should_release=false
+          fi
+
+          echo "upstream_ref=${upstream_ref}" >> "$GITHUB_OUTPUT"
+          echo "upstream_tag=${upstream_tag}" >> "$GITHUB_OUTPUT"
+          echo "upstream_channel=${upstream_channel}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+          echo "should_release=${should_release}" >> "$GITHUB_OUTPUT"
 
       - name: Configure git
         run: |
@@ -64,7 +117,7 @@ jobs:
       - name: Sync upstream and apply patch branches
         id: sync
         env:
-          UPSTREAM_REF: ${{ steps.inputs.outputs.upstream_ref }}
+          UPSTREAM_REF: ${{ steps.upstream.outputs.upstream_ref }}
         run: |
           set -euo pipefail
 
@@ -136,3 +189,11 @@ jobs:
       - name: Push release/main
         if: success() && vars.AUTO_RELEASE_ENABLED != 'false' && steps.inputs.outputs.update_release_branch == 'true' && (steps.diff.outputs.release_changed == 'true' || steps.inputs.outputs.force_push == 'true')
         run: git push --force origin HEAD:release/main
+
+      - name: Trigger auto-release workflow
+        if: success() && vars.AUTO_RELEASE_ENABLED != 'false' && steps.inputs.outputs.update_release_branch == 'true' && steps.upstream.outputs.should_release == 'true' && (steps.diff.outputs.release_changed == 'true' || steps.inputs.outputs.force_push == 'true')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.upstream_tag }}
+          UPSTREAM_CHANNEL: ${{ steps.upstream.outputs.upstream_channel }}
+        run: gh workflow run auto-release.yml --repo "${{ github.repository }}" --ref release/main -f upstream_version="${UPSTREAM_TAG}" -f release_channel="${UPSTREAM_CHANNEL}"
