@@ -48,7 +48,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Resolve inputs
         id: inputs
@@ -176,6 +176,20 @@ jobs:
 
           echo "upstream_changed=${upstream_changed}" >> "$GITHUB_OUTPUT"
           echo "release_changed=${release_changed}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure authenticated remote for push
+        if: success() && (steps.diff.outputs.upstream_changed == 'true' || (vars.AUTO_RELEASE_ENABLED != 'false' && steps.inputs.outputs.update_release_branch == 'true' && steps.diff.outputs.release_changed == 'true') || steps.inputs.outputs.force_push == 'true')
+        env:
+          PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${PUSH_TOKEN:-}" ]]; then
+            echo "::error::Missing PUSH_TOKEN secret. Add a repo secret named PUSH_TOKEN with repo + workflow write access."
+            exit 1
+          fi
+
+          git remote set-url origin "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Push src/upstream
         if: success() && (steps.diff.outputs.upstream_changed == 'true' || steps.inputs.outputs.force_push == 'true')
