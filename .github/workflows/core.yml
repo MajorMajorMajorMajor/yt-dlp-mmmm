@@ -1,6 +1,8 @@
 name: Core Tests
 on:
   push:
+    branches-ignore:
+      - src/upstream
     paths:
       - .github/**
       - devscripts/**
