@@ -135,6 +135,20 @@ jobs:
             fi
           done
 
+          mkdir -p .github/workflows
+          find .github/workflows -maxdepth 1 -type f \
+            ! -name 'auto-release.yml' \
+            ! -name 'sync.yml' \
+            ! -name 'release-nightly.yml' \
+            ! -name 'build.yml' \
+            ! -name 'release.yml' \
+            -delete
+
+          git add -A .github/workflows
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: remove upstream workflow files"
+          fi
+
           echo "upstream_sha=${upstream_sha}" >> "$GITHUB_OUTPUT"
           echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
